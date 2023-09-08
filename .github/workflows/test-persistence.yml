@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+  workflow_dispatch:
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Start LocalStack
+        env:
+          LOCALSTACK_API_KEY: ${{ secrets.LOCALSTACK_API_KEY }}
+        run: |
+          pip install localstack awscli-local
+          pip install terraform-local
+          docker pull localstack/localstack-pro 
+          DEBUG=1 PERSISTENCE=1 SNAPSHOT_SAVE_STRATEGY="MANUAL" localstack start -d
+
+          echo "Waiting for LocalStack startup..."  
+          localstack wait -t 30                    
+          echo "Startup complete"     
+      - name: Deploy app
+        run: |
+          ./deploy.sh
+      - name: Save snapshot
+        run: |
+          curl -X POST localhost:4566/_localstack/state/save
+      - name: Restart LocalStack
+        run: |
+          localstack stop
+          DEBUG=1 PERSISTENCE=1 SNAPSHOT_LOAD_STRATEGY="MANUAL" localstack start -d
+
+          echo "Waiting for LocalStack startup..."  
+          localstack wait -t 30                    
+          echo "Startup complete"     
+      - name: Restore snapshot
+        run: |
+          curl -X POST localhost:4566/_localstack/state/load
+          awslocal acm list-certificates
